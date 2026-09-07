@@ -133,10 +133,35 @@ def main():
     })
 
     if response_event.wait(timeout=5):
-        print("\n==================== MCP TOOL RESPONSE ====================")
+        print("\n==================== MCP TOOL RESPONSE (PLTR) ====================")
         result = last_response["data"].get("result", {})
         print(json.dumps(result, indent=2))
-        print("===========================================================")
+        print("==================================================================")
+    else:
+        print("[-] Timed out waiting for tool response.")
+
+    print(f"\n[*] Invoking tool 'getHistoricalVwap' for SOLUSDT (live Binance feed via Kafka)...")
+    response_event.clear()
+    send_rpc({
+        "jsonrpc": "2.0",
+        "id": "4",
+        "method": "tools/call",
+        "params": {
+            "name": "getHistoricalVwap",
+            "arguments": {
+                "symbol": "SOLUSDT",
+                "startTime": start_time,
+                "endTime": end_time,
+                "resolutionSeconds": 5
+            }
+        }
+    })
+
+    if response_event.wait(timeout=5):
+        print("\n==================== MCP TOOL RESPONSE (SOLUSDT) ====================")
+        result = last_response["data"].get("result", {})
+        print(json.dumps(result, indent=2))
+        print("=====================================================================")
     else:
         print("[-] Timed out waiting for tool response.")
 
