@@ -37,6 +37,9 @@ class McpApplicationTest {
     @Autowired
     private BinanceWebSocketClient binanceWebSocketClient;
 
+    @org.springframework.boot.test.mock.mockito.MockBean
+    private org.springframework.kafka.core.KafkaTemplate<String, MarketTick> kafkaTemplate;
+
     @Test
     @DisplayName("Context loads, live WebSocket ingestion clients and MCP tools are registered")
     void contextLoads() {

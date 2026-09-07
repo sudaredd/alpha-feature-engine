@@ -8,6 +8,7 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -27,14 +28,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Real-time WebSocket ingestion client for Alpaca IEX Market Data (US Equities).
  * Connects to Alpaca v2 streaming endpoint, authenticates, subscribes to configured tickers,
- * normalizes trades to MarketTick, and feeds RealtimeMarketDataService.
+ * normalizes trades to MarketTick, and publishes them to the "market.ticks" Kafka topic.
  */
 @Service
 public class AlpacaWebSocketClient implements WebSocket.Listener {
 
     private static final Logger log = LoggerFactory.getLogger(AlpacaWebSocketClient.class);
+    public static final String TOPIC_MARKET_TICKS = "market.ticks";
 
-    private final RealtimeMarketDataService marketDataService;
+    private final KafkaTemplate<String, MarketTick> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService reconnectScheduler;
     private final HttpClient httpClient;
@@ -50,14 +52,14 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
     private final StringBuilder messageBuffer = new StringBuilder();
 
     public AlpacaWebSocketClient(
-            RealtimeMarketDataService marketDataService,
+            KafkaTemplate<String, MarketTick> kafkaTemplate,
             ObjectMapper objectMapper,
             @Value("${alpaca.api-key:default_key}") String apiKey,
             @Value("${alpaca.api-secret:default_secret}") String apiSecret,
             @Value("${alpaca.symbols:PLTR,QQQ,VUG,SPMO}") String symbols,
             @Value("${alpaca.ws-url:wss://stream.data.alpaca.markets/v2/iex}") String wsUrl) {
 
-        this.marketDataService = marketDataService;
+        this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.apiKey = apiKey;
         this.apiSecret = apiSecret;
@@ -122,6 +124,7 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
 
     @Override
     public void onOpen(WebSocket webSocket) {
+        this.webSocket = webSocket;
         log.info("[AlpacaWebSocketClient] Channel opened, awaiting server handshake...");
         webSocket.request(1);
     }
@@ -233,9 +236,9 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
 
             long priceFixed = Math.round(priceDouble * RealtimeMarketDataService.PRICE_SCALE);
             MarketTick tick = new MarketTick(symbol, timestampMs, priceFixed, size);
-            marketDataService.ingest(tick);
+            kafkaTemplate.send(TOPIC_MARKET_TICKS, symbol, tick);
 
-            log.info("[AlpacaWebSocketClient] Live Trade: {} @ ${} (shares={})", symbol, priceDouble, size);
+            log.info("[AlpacaWebSocketClient] Live Trade: {} @ ${} (shares={}) -> published to Kafka", symbol, priceDouble, size);
         } catch (Exception e) {
             log.debug("[AlpacaWebSocketClient] Error parsing trade tick: {}", e.getMessage());
         }

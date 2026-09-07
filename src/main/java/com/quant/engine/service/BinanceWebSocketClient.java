@@ -8,6 +8,7 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -26,14 +27,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Real-time WebSocket ingestion client for Binance public market data (Crypto).
  * Streams live trade events (@trade) for configured crypto pairs, normalizes them
- * with fractional volume into MarketTick, and feeds RealtimeMarketDataService.
+ * with fractional volume into MarketTick, and publishes them to the "market.ticks" Kafka topic.
  */
 @Service
 public class BinanceWebSocketClient implements WebSocket.Listener {
 
     private static final Logger log = LoggerFactory.getLogger(BinanceWebSocketClient.class);
+    public static final String TOPIC_MARKET_TICKS = "market.ticks";
 
-    private final RealtimeMarketDataService marketDataService;
+    private final KafkaTemplate<String, MarketTick> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final ScheduledExecutorService reconnectScheduler;
     private final HttpClient httpClient;
@@ -46,12 +48,12 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
     private final StringBuilder messageBuffer = new StringBuilder();
 
     public BinanceWebSocketClient(
-            RealtimeMarketDataService marketDataService,
+            KafkaTemplate<String, MarketTick> kafkaTemplate,
             ObjectMapper objectMapper,
             @Value("${binance.symbols:BTCUSDT,ETHUSDT,SOLUSDT}") String symbols,
             @Value("${binance.ws-url:wss://stream.binance.us:9443/ws}") String wsUrl) {
 
-        this.marketDataService = marketDataService;
+        this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.symbols = symbols;
         this.currentWsUrl = wsUrl;
@@ -191,9 +193,9 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
             long priceFixed = Math.round(priceDouble * RealtimeMarketDataService.PRICE_SCALE);
 
             MarketTick tick = new MarketTick(symbol, tradeTime, priceFixed, quantity);
-            marketDataService.ingest(tick);
+            kafkaTemplate.send(TOPIC_MARKET_TICKS, symbol, tick);
 
-            log.info("[BinanceWebSocketClient] Live Trade: {} @ ${} (qty={})", symbol, priceDouble, quantity);
+            log.info("[BinanceWebSocketClient] Live Trade: {} @ ${} (qty={}) -> published to Kafka", symbol, priceDouble, quantity);
         } catch (Exception e) {
             log.debug("[BinanceWebSocketClient] Error parsing trade: {}", e.getMessage());
         }

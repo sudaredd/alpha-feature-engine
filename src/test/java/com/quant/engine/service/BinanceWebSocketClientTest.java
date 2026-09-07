@@ -1,33 +1,36 @@
 package com.quant.engine.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.engine.model.TimeBar;
+import com.quant.engine.model.MarketTick;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
+import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class BinanceWebSocketClientTest {
 
-    private RealtimeMarketDataService marketDataService;
+    @SuppressWarnings("unchecked")
+    private final KafkaTemplate<String, MarketTick> kafkaTemplate = mock(KafkaTemplate.class);
     private BinanceWebSocketClient client;
 
     @BeforeEach
     void setUp() {
-        marketDataService = new RealtimeMarketDataService();
         client = new BinanceWebSocketClient(
-                marketDataService,
+                kafkaTemplate,
                 new ObjectMapper(),
                 "BTCUSDT,ETHUSDT",
-                "wss://stream.binance.com:9443/ws"
+                "wss://stream.binance.us:9443/ws"
         );
     }
 
     @Test
-    @DisplayName("Should parse direct Binance trade event and aggregate fractional crypto volume")
+    @DisplayName("Should parse direct Binance trade event and publish MarketTick to Kafka topic market.ticks")
     void testProcessBinanceTradeDirect() {
         long tradeTime = 1788819000000L;
         String tradePayload = """
@@ -48,18 +51,18 @@ class BinanceWebSocketClientTest {
 
         client.processMessage(tradePayload);
 
-        List<TimeBar> bars = marketDataService.getDownsampledBars("BTCUSDT", tradeTime, tradeTime + 5000, 5);
-        assertEquals(1, bars.size());
-        TimeBar bar = bars.getFirst();
+        ArgumentCaptor<MarketTick> captor = ArgumentCaptor.forClass(MarketTick.class);
+        verify(kafkaTemplate).send(eq("market.ticks"), eq("BTCUSDT"), captor.capture());
 
-        assertEquals(95000.50, bar.open(), 0.01);
-        assertEquals(95000.50, bar.close(), 0.01);
-        assertEquals(0.125, bar.totalVolume(), 0.0001);
-        assertEquals(95000.50, bar.vwap(), 0.01);
+        MarketTick tick = captor.getValue();
+        assertEquals("BTCUSDT", tick.symbol());
+        assertEquals(tradeTime, tick.timestampMs());
+        assertEquals(950005000L, tick.price());
+        assertEquals(0.125, tick.volume(), 0.0001);
     }
 
     @Test
-    @DisplayName("Should parse combined stream payload format")
+    @DisplayName("Should parse combined stream payload format and publish to Kafka")
     void testProcessCombinedStreamFormat() {
         long tradeTime = 1788819100000L;
         String combinedPayload = """
@@ -79,13 +82,13 @@ class BinanceWebSocketClientTest {
 
         client.processMessage(combinedPayload);
 
-        List<TimeBar> bars = marketDataService.getDownsampledBars("ETHUSDT", tradeTime, tradeTime + 5000, 5);
-        assertEquals(1, bars.size());
-        TimeBar bar = bars.getFirst();
+        ArgumentCaptor<MarketTick> captor = ArgumentCaptor.forClass(MarketTick.class);
+        verify(kafkaTemplate).send(eq("market.ticks"), eq("ETHUSDT"), captor.capture());
 
-        assertEquals(3450.25, bar.open(), 0.01);
-        assertEquals(3450.25, bar.close(), 0.01);
-        assertEquals(2.50, bar.totalVolume(), 0.0001);
-        assertEquals(3450.25, bar.vwap(), 0.01);
+        MarketTick tick = captor.getValue();
+        assertEquals("ETHUSDT", tick.symbol());
+        assertEquals(tradeTime, tick.timestampMs());
+        assertEquals(34502500L, tick.price());
+        assertEquals(2.50, tick.volume(), 0.0001);
     }
 }

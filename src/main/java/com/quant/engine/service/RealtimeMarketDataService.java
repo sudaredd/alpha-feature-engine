@@ -26,6 +26,17 @@ public class RealtimeMarketDataService {
     private final ConcurrentSkipListMap<Long, List<MarketTick>> ticksByTimestamp = new ConcurrentSkipListMap<>();
 
     /**
+     * Kafka consumer listener that receives normalized MarketTick events from the
+     * "market.ticks" topic and ingests them into the temporal store.
+     *
+     * @param tick MarketTick consumed from Kafka
+     */
+    @org.springframework.kafka.annotation.KafkaListener(topics = "market.ticks")
+    public void onMarketTick(MarketTick tick) {
+        ingest(tick);
+    }
+
+    /**
      * Ingests a new market tick into the temporal store and strictly evicts any data
      * older than 30 minutes.
      *

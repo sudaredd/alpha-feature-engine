@@ -1,26 +1,33 @@
 package com.quant.engine.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.engine.model.TimeBar;
+import com.quant.engine.model.MarketTick;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.time.Instant;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 class AlpacaWebSocketClientTest {
 
-    private RealtimeMarketDataService marketDataService;
+    @SuppressWarnings("unchecked")
+    private final KafkaTemplate<String, MarketTick> kafkaTemplate = mock(KafkaTemplate.class);
     private AlpacaWebSocketClient client;
 
     @BeforeEach
     void setUp() {
-        marketDataService = new RealtimeMarketDataService();
         client = new AlpacaWebSocketClient(
-                marketDataService,
+                kafkaTemplate,
                 new ObjectMapper(),
                 "test_key",
                 "test_secret",
@@ -30,7 +37,7 @@ class AlpacaWebSocketClientTest {
     }
 
     @Test
-    @DisplayName("Should parse Alpaca trade payload and ingest into RealtimeMarketDataService")
+    @DisplayName("Should parse Alpaca trade payload and publish MarketTick to Kafka topic market.ticks")
     void testProcessAlpacaTrade() {
         long baseTimeMs = 1_000_000L;
         String t1 = Instant.ofEpochMilli(baseTimeMs + 100).toString();
@@ -65,20 +72,25 @@ class AlpacaWebSocketClientTest {
 
         client.processMessage(tradePayload);
 
-        List<TimeBar> bars = marketDataService.getDownsampledBars("PLTR", baseTimeMs, baseTimeMs + 4999, 5);
-        assertEquals(1, bars.size());
-        TimeBar bar = bars.getFirst();
+        ArgumentCaptor<MarketTick> tickCaptor = ArgumentCaptor.forClass(MarketTick.class);
+        verify(kafkaTemplate, times(2)).send(eq("market.ticks"), eq("PLTR"), tickCaptor.capture());
 
-        assertEquals(150.75, bar.open(), 0.001);
-        assertEquals(151.25, bar.close(), 0.001);
-        assertEquals(400.0, bar.totalVolume(), 0.001);
+        var ticks = tickCaptor.getAllValues();
+        assertEquals(2, ticks.size());
 
-        // Expected VWAP: (150.75 * 250 + 151.25 * 150) / 400 = (37687.5 + 22687.5) / 400 = 60375 / 400 = 150.9375
-        assertEquals(150.9375, bar.vwap(), 0.001);
+        MarketTick tick1 = ticks.get(0);
+        assertEquals("PLTR", tick1.symbol());
+        assertEquals(1507500L, tick1.price());
+        assertEquals(250.0, tick1.volume());
+
+        MarketTick tick2 = ticks.get(1);
+        assertEquals("PLTR", tick2.symbol());
+        assertEquals(1512500L, tick2.price());
+        assertEquals(150.0, tick2.volume());
     }
 
     @Test
-    @DisplayName("Should handle system handshake and error messages gracefully without exception")
+    @DisplayName("Should handle system handshake and error messages gracefully without publishing to Kafka")
     void testProcessHandshakeAndErrors() {
         String connectedMsg = """
                 [{"T":"success","msg":"connected"}]
@@ -90,7 +102,6 @@ class AlpacaWebSocketClientTest {
                 """;
         client.processMessage(errorMsg);
 
-        // No exceptions thrown, market store unaffected
-        assertEquals(0, marketDataService.size());
+        verify(kafkaTemplate, never()).send(eq("market.ticks"), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(MarketTick.class));
     }
 }

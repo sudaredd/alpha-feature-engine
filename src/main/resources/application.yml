@@ -8,6 +8,16 @@ spring:
         type: sync
         webmvc:
           protocol: streamable
+  kafka:
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: alpha-feature-engine-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
 
 alpaca:
   api-key: ${ALPACA_API_KEY:default_key}
