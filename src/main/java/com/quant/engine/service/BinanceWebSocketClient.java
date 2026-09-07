@@ -39,7 +39,7 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
     private final HttpClient httpClient;
 
     private final String symbols;
-    private final String wsUrl;
+    private volatile String currentWsUrl;
 
     private WebSocket webSocket;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -49,12 +49,12 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
             RealtimeMarketDataService marketDataService,
             ObjectMapper objectMapper,
             @Value("${binance.symbols:BTCUSDT,ETHUSDT,SOLUSDT}") String symbols,
-            @Value("${binance.ws-url:wss://stream.binance.com:9443/ws}") String wsUrl) {
+            @Value("${binance.ws-url:wss://stream.binance.us:9443/ws}") String wsUrl) {
 
         this.marketDataService = marketDataService;
         this.objectMapper = objectMapper;
         this.symbols = symbols;
-        this.wsUrl = wsUrl;
+        this.currentWsUrl = wsUrl;
 
         this.reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "binance-ws-reconnect");
@@ -70,7 +70,7 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
     @PostConstruct
     public void start() {
         isRunning.set(true);
-        log.info("[BinanceWebSocketClient] Initializing live Binance crypto trade stream for [{}] at {}", symbols, wsUrl);
+        log.info("[BinanceWebSocketClient] Initializing live Binance crypto trade stream for [{}] at {}", symbols, currentWsUrl);
         connectAsync();
     }
 
@@ -82,19 +82,31 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
         try {
             httpClient.newWebSocketBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
-                    .buildAsync(URI.create(wsUrl), this)
+                    .buildAsync(URI.create(currentWsUrl), this)
                     .whenComplete((ws, throwable) -> {
                         if (throwable != null) {
-                            log.warn("[BinanceWebSocketClient] Connection failed: {}. Scheduling reconnect in 10s...", throwable.getMessage());
+                            log.warn("[BinanceWebSocketClient] Connection failed on {}: {}. Attempting fallback / scheduling reconnect...",
+                                    currentWsUrl, throwable.getMessage());
+                            toggleFallbackUrl();
                             scheduleReconnect(10);
                         } else {
                             this.webSocket = ws;
-                            log.info("[BinanceWebSocketClient] WebSocket connection established.");
+                            log.info("[BinanceWebSocketClient] WebSocket connection established on {}", currentWsUrl);
                         }
                     });
         } catch (Exception e) {
-            log.warn("[BinanceWebSocketClient] Error initiating connection: {}. Reconnecting in 10s...", e.getMessage());
+            log.warn("[BinanceWebSocketClient] Error initiating connection: {}. Scheduling reconnect in 10s...", e.getMessage());
+            toggleFallbackUrl();
             scheduleReconnect(10);
+        }
+    }
+
+    private void toggleFallbackUrl() {
+        if (currentWsUrl.contains("binance.com")) {
+            currentWsUrl = "wss://stream.binance.us:9443/ws";
+            log.info("[BinanceWebSocketClient] Switched endpoint to US mirror: {}", currentWsUrl);
+        } else if (currentWsUrl.contains("binance.us")) {
+            currentWsUrl = "wss://stream.binance.com:9443/ws";
         }
     }
 
@@ -180,7 +192,7 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
             MarketTick tick = new MarketTick(symbol, tradeTime, priceFixed, quantity);
             marketDataService.ingest(tick);
 
-            log.trace("[BinanceWebSocketClient] Ingested tick: {} @ ${} (vol={})", symbol, priceDouble, quantity);
+            log.info("[BinanceWebSocketClient] Live Trade: {} @ ${} (qty={})", symbol, priceDouble, quantity);
         } catch (Exception e) {
             log.debug("[BinanceWebSocketClient] Error parsing trade: {}", e.getMessage());
         }

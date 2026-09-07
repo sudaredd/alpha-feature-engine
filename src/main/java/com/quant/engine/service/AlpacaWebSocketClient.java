@@ -46,6 +46,7 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
 
     private WebSocket webSocket;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
+    private final AtomicBoolean authFailed = new AtomicBoolean(false);
     private final StringBuilder messageBuffer = new StringBuilder();
 
     public AlpacaWebSocketClient(
@@ -77,8 +78,16 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
     @PostConstruct
     public void start() {
         isRunning.set(true);
+        if (isDefaultOrBlank(apiKey)) {
+            log.warn("[AlpacaWebSocketClient] Alpaca credentials not configured (using placeholder 'default_key'). "
+                    + "Set ALPACA_API_KEY and ALPACA_API_SECRET environment variables to stream live US equities.");
+        }
         log.info("[AlpacaWebSocketClient] Initializing live Alpaca IEX stream for symbols: [{}] at {}", symbols, wsUrl);
         connectAsync();
+    }
+
+    private boolean isDefaultOrBlank(String key) {
+        return key == null || key.isBlank() || "default_key".equalsIgnoreCase(key.trim());
     }
 
     private void connectAsync() {
@@ -92,21 +101,21 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
                     .buildAsync(URI.create(wsUrl), this)
                     .whenComplete((ws, throwable) -> {
                         if (throwable != null) {
-                            log.warn("[AlpacaWebSocketClient] Connection failed: {}. Scheduling reconnect in 10s...", throwable.getMessage());
-                            scheduleReconnect(10);
+                            log.warn("[AlpacaWebSocketClient] Connection failed: {}. Scheduling reconnect in 30s...", throwable.getMessage());
+                            scheduleReconnect(30);
                         } else {
                             this.webSocket = ws;
                             log.info("[AlpacaWebSocketClient] WebSocket connection established.");
                         }
                     });
         } catch (Exception e) {
-            log.warn("[AlpacaWebSocketClient] Error initiating connection: {}. Reconnecting in 10s...", e.getMessage());
-            scheduleReconnect(10);
+            log.warn("[AlpacaWebSocketClient] Error initiating connection: {}. Reconnecting in 30s...", e.getMessage());
+            scheduleReconnect(30);
         }
     }
 
     private void scheduleReconnect(int delaySeconds) {
-        if (isRunning.get()) {
+        if (isRunning.get() && !authFailed.get()) {
             reconnectScheduler.schedule(this::connectAsync, delaySeconds, TimeUnit.SECONDS);
         }
     }
@@ -154,6 +163,7 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
                     log.info("[AlpacaWebSocketClient] Handshake received. Authenticating...");
                     sendAuth();
                 } else if ("authenticated".equalsIgnoreCase(msg)) {
+                    authFailed.set(false);
                     log.info("[AlpacaWebSocketClient] Authenticated successfully. Subscribing to trades...");
                     sendSubscription();
                 }
@@ -162,7 +172,13 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
             case "error" -> {
                 int code = node.path("code").asInt();
                 String msg = node.path("msg").asText();
-                log.warn("[AlpacaWebSocketClient] Server returned error [code={}]: {}", code, msg);
+                if (code == 402 && isDefaultOrBlank(apiKey)) {
+                    authFailed.set(true);
+                    log.warn("[AlpacaWebSocketClient] Alpaca rejected default credentials ('{}'). "
+                            + "US Equities feed is paused until valid ALPACA_API_KEY / ALPACA_API_SECRET are provided.", apiKey);
+                } else {
+                    log.warn("[AlpacaWebSocketClient] Server returned error [code={}]: {}", code, msg);
+                }
             }
             case "t" -> processTrade(node);
             default -> log.trace("[AlpacaWebSocketClient] Unhandled message type: {}", msgType);
@@ -219,7 +235,7 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
             MarketTick tick = new MarketTick(symbol, timestampMs, priceFixed, size);
             marketDataService.ingest(tick);
 
-            log.trace("[AlpacaWebSocketClient] Ingested tick: {} @ ${} (vol={})", symbol, priceDouble, size);
+            log.info("[AlpacaWebSocketClient] Live Trade: {} @ ${} (shares={})", symbol, priceDouble, size);
         } catch (Exception e) {
             log.debug("[AlpacaWebSocketClient] Error parsing trade tick: {}", e.getMessage());
         }
@@ -227,15 +243,21 @@ public class AlpacaWebSocketClient implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-        log.warn("[AlpacaWebSocketClient] WebSocket closed [code={}]: {}. Reconnecting...", statusCode, reason);
-        scheduleReconnect(5);
+        if (authFailed.get()) {
+            log.info("[AlpacaWebSocketClient] WebSocket closed following authentication rejection. Waiting for valid credentials.");
+        } else {
+            log.warn("[AlpacaWebSocketClient] WebSocket closed [code={}]: {}. Reconnecting in 10s...", statusCode, reason);
+            scheduleReconnect(10);
+        }
         return CompletableFuture.completedFuture(null);
     }
 
     @Override
     public void onError(WebSocket webSocket, Throwable error) {
-        log.warn("[AlpacaWebSocketClient] WebSocket error: {}. Reconnecting...", error.getMessage());
-        scheduleReconnect(5);
+        if (!authFailed.get()) {
+            log.warn("[AlpacaWebSocketClient] WebSocket error: {}. Reconnecting...", error.getMessage());
+            scheduleReconnect(10);
+        }
     }
 
     @PreDestroy
