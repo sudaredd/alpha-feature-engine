@@ -1,0 +1,10 @@
+server:
+  port: 8080
+
+spring:
+  ai:
+    mcp:
+      server:
+        type: sync
+        webmvc:
+          protocol: streamable
