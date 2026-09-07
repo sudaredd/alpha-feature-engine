@@ -118,13 +118,14 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
 
     @Override
     public void onOpen(WebSocket webSocket) {
+        this.webSocket = webSocket;
         log.info("[BinanceWebSocketClient] Channel opened. Subscribing to trade streams...");
-        subscribeStreams();
+        subscribeStreams(webSocket);
         webSocket.request(1);
     }
 
-    private void subscribeStreams() {
-        if (webSocket == null) {
+    private void subscribeStreams(WebSocket ws) {
+        if (ws == null) {
             return;
         }
 
@@ -137,7 +138,7 @@ public class BinanceWebSocketClient implements WebSocket.Listener {
 
             SubscriptionRequest request = new SubscriptionRequest("SUBSCRIBE", streams, 1);
             String payload = objectMapper.writeValueAsString(request);
-            webSocket.sendText(payload, true);
+            ws.sendText(payload, true);
             log.info("[BinanceWebSocketClient] Sent stream subscription: {}", streams);
         } catch (Exception e) {
             log.error("[BinanceWebSocketClient] Error sending subscription request", e);
