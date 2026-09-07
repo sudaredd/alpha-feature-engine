@@ -1,6 +1,9 @@
 package com.quant.engine;
 
 import com.quant.engine.mcp.AlphaFeatureMcpGateway;
+import com.quant.engine.model.MarketTick;
+import com.quant.engine.service.AlpacaWebSocketClient;
+import com.quant.engine.service.BinanceWebSocketClient;
 import com.quant.engine.service.RealtimeMarketDataService;
 import io.modelcontextprotocol.server.McpSyncServer;
 import org.junit.jupiter.api.DisplayName;
@@ -28,13 +31,21 @@ class McpApplicationTest {
     @Autowired
     private ToolCallbackProvider toolCallbackProvider;
 
+    @Autowired
+    private AlpacaWebSocketClient alpacaWebSocketClient;
+
+    @Autowired
+    private BinanceWebSocketClient binanceWebSocketClient;
+
     @Test
-    @DisplayName("Context loads, beans are registered, and live market feed is producing ticks")
-    void contextLoads() throws InterruptedException {
+    @DisplayName("Context loads, live WebSocket ingestion clients and MCP tools are registered")
+    void contextLoads() {
         assertNotNull(gateway, "Gateway bean should be registered");
         assertNotNull(marketDataService, "RealtimeMarketDataService bean should be registered");
         assertNotNull(mcpSyncServer, "McpSyncServer should be auto-configured");
         assertNotNull(toolCallbackProvider, "ToolCallbackProvider should be auto-configured");
+        assertNotNull(alpacaWebSocketClient, "AlpacaWebSocketClient should be registered");
+        assertNotNull(binanceWebSocketClient, "BinanceWebSocketClient should be registered");
 
         // Verify native MCP auto-registration of getHistoricalVwap and submitOrder tools
         var callbacks = toolCallbackProvider.getToolCallbacks();
@@ -46,15 +57,21 @@ class McpApplicationTest {
         assertTrue(toolNames.contains("submitOrder"));
         assertNotNull(mcpSyncServer.getServerCapabilities().tools());
 
-        // Allow feed producer to emit ticks (20 ticks/sec -> 50ms interval)
-        Thread.sleep(150);
-
-        assertTrue(marketDataService.size() > 0, "Market feed producer should have ingested ticks");
-
-        // Verify downsample query on live streamed ticks
+        // Verify market data service ingestion and downsample calculation
         long now = System.currentTimeMillis();
-        var bars = marketDataService.getDownsampledBars("PLTR", now - 5000, now + 1000, 1);
-        assertNotNull(bars);
-        assertTrue(!bars.isEmpty(), "Downsampled bars should be generated from live ticks");
+        marketDataService.ingest(new MarketTick("PLTR", now - 2000, 1_502_500L, 100.0));
+        marketDataService.ingest(new MarketTick("BTCUSDT", now - 1000, 9_000_000_000L, 0.5));
+
+        assertTrue(marketDataService.size() >= 2, "Market data service should contain ingested ticks");
+
+        var pltrResponse = gateway.getHistoricalVwap("PLTR", "now-1m", "now", 5);
+        assertNotNull(pltrResponse);
+        assertEquals("PLTR", pltrResponse.symbol());
+        assertTrue(!pltrResponse.bars().isEmpty());
+
+        var btcResponse = gateway.getHistoricalVwap("BTCUSDT", "now-1m", "now", 5);
+        assertNotNull(btcResponse);
+        assertEquals("BTCUSDT", btcResponse.symbol());
+        assertTrue(!btcResponse.bars().isEmpty());
     }
 }

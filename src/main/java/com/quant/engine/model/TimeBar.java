@@ -20,6 +20,6 @@ public record TimeBar(
         double low,
         double close,
         double vwap,
-        long totalVolume
+        double totalVolume
 ) {
 }

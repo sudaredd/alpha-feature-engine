@@ -92,12 +92,12 @@ public class RealtimeMarketDataService {
             double close = ticks.getLast().price() / PRICE_SCALE;
             long highRaw = Long.MIN_VALUE;
             long lowRaw = Long.MAX_VALUE;
-            long totalVolume = 0L;
+            double totalVolume = 0.0;
             double sumWeightedPrice = 0.0;
 
             for (MarketTick t : ticks) {
                 long priceRaw = t.price();
-                long vol = t.volume();
+                double vol = t.volume();
 
                 if (priceRaw > highRaw) highRaw = priceRaw;
                 if (priceRaw < lowRaw) lowRaw = priceRaw;
@@ -108,7 +108,7 @@ public class RealtimeMarketDataService {
 
             double high = highRaw / PRICE_SCALE;
             double low = lowRaw / PRICE_SCALE;
-            double vwap = totalVolume > 0 ? (sumWeightedPrice / totalVolume) : close;
+            double vwap = totalVolume > 0.0 ? (sumWeightedPrice / totalVolume) : close;
 
             resultBars.add(new TimeBar(
                     Instant.ofEpochMilli(bucketStartMs),

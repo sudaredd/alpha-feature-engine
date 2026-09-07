@@ -3,16 +3,16 @@ package com.quant.engine.model;
 /**
  * Represents a raw market tick event.
  *
- * @param symbol      Ticker symbol (e.g., "PLTR")
+ * @param symbol      Ticker symbol (e.g., "PLTR", "BTCUSDT")
  * @param timestampMs Epoch timestamp in milliseconds
  * @param price       Fixed-point scaled price (e.g., $150.25 -> 1502500L, scaled by 10^4)
- * @param volume      Number of shares/contracts traded
+ * @param volume      Number of shares/contracts/tokens traded (supports fractional amounts)
  */
 public record MarketTick(
         String symbol,
         long timestampMs,
         long price,
-        long volume
+        double volume
 ) {
     public MarketTick {
         if (symbol == null || symbol.isBlank()) {
@@ -21,8 +21,8 @@ public record MarketTick(
         if (price < 0) {
             throw new IllegalArgumentException("price cannot be negative: " + price);
         }
-        if (volume < 0) {
-            throw new IllegalArgumentException("volume cannot be negative: " + volume);
+        if (volume < 0 || Double.isNaN(volume) || Double.isInfinite(volume)) {
+            throw new IllegalArgumentException("volume cannot be negative or non-finite: " + volume);
         }
     }
 }

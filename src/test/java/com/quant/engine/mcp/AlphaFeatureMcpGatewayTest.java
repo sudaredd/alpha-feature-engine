@@ -51,7 +51,7 @@ class AlphaFeatureMcpGatewayTest {
         assertEquals(150.50, bar.high(), 0.001);
         assertEquals(150.25, bar.low(), 0.001);
         assertEquals(150.50, bar.close(), 0.001);
-        assertEquals(300, bar.totalVolume());
+        assertEquals(300.0, bar.totalVolume(), 0.001);
     }
 
     @Test

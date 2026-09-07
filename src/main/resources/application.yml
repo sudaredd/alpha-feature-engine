@@ -8,3 +8,13 @@ spring:
         type: sync
         webmvc:
           protocol: streamable
+
+alpaca:
+  api-key: ${ALPACA_API_KEY:default_key}
+  api-secret: ${ALPACA_API_SECRET:default_secret}
+  symbols: ${ALPACA_SYMBOLS:PLTR,QQQ,VUG,SPMO}
+  ws-url: ${ALPACA_WS_URL:wss://stream.data.alpaca.markets/v2/iex}
+
+binance:
+  symbols: ${BINANCE_SYMBOLS:BTCUSDT,ETHUSDT,SOLUSDT}
+  ws-url: ${BINANCE_WS_URL:wss://stream.binance.com:9443/ws}
