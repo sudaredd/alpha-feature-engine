@@ -3,6 +3,7 @@ package com.quant.engine.mcp;
 import com.quant.engine.model.DownsampledSeriesResponse;
 import com.quant.engine.model.OrderExecutionResponse;
 import com.quant.engine.model.TimeBar;
+import com.quant.engine.service.AlphaVantageMarketDataService;
 import com.quant.engine.service.RealtimeMarketDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,9 +27,18 @@ public class AlphaFeatureMcpGateway {
     private static final Logger log = LoggerFactory.getLogger(AlphaFeatureMcpGateway.class);
 
     private final RealtimeMarketDataService realtimeMarketDataService;
+    private final AlphaVantageMarketDataService alphaVantageService;
 
     public AlphaFeatureMcpGateway(RealtimeMarketDataService realtimeMarketDataService) {
+        this(realtimeMarketDataService, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AlphaFeatureMcpGateway(
+            RealtimeMarketDataService realtimeMarketDataService,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) AlphaVantageMarketDataService alphaVantageService) {
         this.realtimeMarketDataService = realtimeMarketDataService;
+        this.alphaVantageService = alphaVantageService;
     }
 
     @McpTool(description = "Submits a live trade order to the execution engine.")
@@ -80,6 +90,12 @@ public class AlphaFeatureMcpGateway {
                 realtimeMarketDataService.size());
 
         List<TimeBar> bars = realtimeMarketDataService.getDownsampledBars(symbol, startMs, endMs, resolutionSeconds);
+        if (bars.isEmpty() && alphaVantageService != null) {
+            log.info("No in-memory ticks for symbol {}. Requesting Alpha Vantage real-time quote backfill...", symbol);
+            if (alphaVantageService.fetchAndIngestGlobalQuote(symbol)) {
+                bars = realtimeMarketDataService.getDownsampledBars(symbol, startMs, endMs, resolutionSeconds);
+            }
+        }
         log.info("Returning {} downsampled time bar(s) for symbol {}", bars.size(), symbol);
 
         return new DownsampledSeriesResponse(symbol, resolutionSeconds, bars);
