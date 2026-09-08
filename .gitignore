@@ -72,6 +72,7 @@ repomix-output.xml
 .env
 *.env
 .env.*
+!.env.example
 *.local.sh
 run_local.sh
 local_env.sh
