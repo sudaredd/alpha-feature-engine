@@ -75,5 +75,6 @@ repomix-output.xml
 !.env.example
 *.local.sh
 run_local.sh
+run_agent.sh
 local_env.sh
 secrets.sh
