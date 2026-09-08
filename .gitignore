@@ -67,3 +67,12 @@ venv.bak/
 
 # Scratch / dumps
 repomix-output.xml
+
+# Local environment scripts and secrets (Never commit to git)
+.env
+*.env
+.env.*
+*.local.sh
+run_local.sh
+local_env.sh
+secrets.sh
